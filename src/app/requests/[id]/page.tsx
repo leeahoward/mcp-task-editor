@@ -20,6 +20,12 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
   const [splitDetails, setSplitDetails] = useState('');
   const [completed, setCompleted] = useState(false);
 
+  // Add Task Modal state
+  const [showAddTaskModal, setShowAddTaskModal] = useState(false);
+  const [taskTitle, setTaskTitle] = useState('');
+  const [taskDescription, setTaskDescription] = useState('');
+  const [addingTask, setAddingTask] = useState(false);
+
   const load = async (id: string) => {
     try {
       setLoading(true);
@@ -39,8 +45,8 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
       setSplitDetails(data.splitDetails);
       setCompleted(data.completed);
       setError(null);
-    } catch (e: any) {
-      setError(e.message || 'Error loading request');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Error loading request');
     } finally {
       setLoading(false);
     }
@@ -60,10 +66,51 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
       });
       if (!res.ok) throw new Error('Failed to save request');
       await load(requestId); // Reload to get updated data
-    } catch (e: any) {
-      setError(e.message || 'Failed to save');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to save');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const addTask = async () => {
+    if (!taskTitle.trim() || !taskDescription.trim()) {
+      setError('Task title and description are required');
+      return;
+    }
+
+    try {
+      setAddingTask(true);
+      setError(null);
+      
+      const res = await fetch(`/api/requests/${requestId}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: taskTitle.trim(),
+          description: taskDescription.trim(),
+          done: false,
+          approved: false,
+          completedDetails: ''
+        })
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.message || 'Failed to create task');
+      }
+
+      // Reset form and close modal
+      setTaskTitle('');
+      setTaskDescription('');
+      setShowAddTaskModal(false);
+      
+      // Reload to get updated data
+      await load(requestId);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to create task');
+    } finally {
+      setAddingTask(false);
     }
   };
 
@@ -182,7 +229,7 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Tasks ({tasks.length})</h2>
             <button
-              onClick={() => {/* TODO: implement add task */}}
+              onClick={() => setShowAddTaskModal(true)}
               className="px-3 h-8 rounded-md bg-green-600 text-white hover:bg-green-700 text-sm"
             >
               Add Task
@@ -191,7 +238,7 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
           
           {tasks.length === 0 ? (
             <div className="text-center py-8 text-neutral-500">
-              No tasks yet. Click "Add Task" to create one.
+              No tasks yet. Click &quot;Add Task&quot; to create one.
             </div>
           ) : (
             <div className="space-y-3">
@@ -206,6 +253,70 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
           )}
         </div>
       </div>
+
+      {/* Add Task Modal */}
+      {showAddTaskModal && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+          <div className="w-full max-w-lg rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-xl">
+            <div className="p-4 border-b border-neutral-200 dark:border-neutral-800">
+              <h2 className="text-lg font-semibold">Add New Task</h2>
+              <p className="text-sm text-neutral-600 dark:text-neutral-300 mt-1">
+                Create a new task for this request
+              </p>
+            </div>
+            
+            <div className="p-4 space-y-4">
+              {error && (
+                <div className="p-3 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                  <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
+                </div>
+              )}
+              
+              <TextInput
+                label="Task Title"
+                value={taskTitle}
+                onChange={(e) => setTaskTitle(e.target.value)}
+                placeholder="Enter task title..."
+                disabled={addingTask}
+              />
+              
+              <TextArea
+                label="Task Description"
+                value={taskDescription}
+                onChange={(e) => setTaskDescription(e.target.value)}
+                placeholder="Enter detailed task description..."
+                rows={4}
+                disabled={addingTask}
+              />
+            </div>
+            
+            <div className="p-4 border-t border-neutral-200 dark:border-neutral-800 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowAddTaskModal(false);
+                  setTaskTitle('');
+                  setTaskDescription('');
+                  setError(null);
+                }}
+                disabled={addingTask}
+                className="px-4 h-9 rounded-md border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-sm disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={addTask}
+                disabled={addingTask || !taskTitle.trim() || !taskDescription.trim()}
+                className="px-4 h-9 rounded-md bg-green-600 text-white hover:bg-green-700 disabled:bg-green-400 disabled:cursor-not-allowed text-sm flex items-center gap-2"
+              >
+                {addingTask && (
+                  <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                )}
+                {addingTask ? 'Creating...' : 'Create Task'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

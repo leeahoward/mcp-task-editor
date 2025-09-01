@@ -11,10 +11,10 @@ const dataService = TasksDataService.getInstance();
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string; taskId: string } }
+  { params }: { params: Promise<{ id: string; taskId: string }> }
 ) {
   try {
-    const { id: requestId, taskId } = extractParams(params);
+    const { id: requestId, taskId } = await extractParams(params);
     
     if (!requestId || !taskId) {
       return createErrorResponse('Request ID and Task ID are required', 400);
@@ -43,10 +43,10 @@ export async function GET(
  */
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string; taskId: string } }
+  { params }: { params: Promise<{ id: string; taskId: string }> }
 ) {
   try {
-    const { id: requestId, taskId } = extractParams(params);
+    const { id: requestId, taskId } = await extractParams(params);
     
     if (!requestId || !taskId) {
       return createErrorResponse('Request ID and Task ID are required', 400);
@@ -71,10 +71,10 @@ export async function PUT(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string; taskId: string } }
+  { params }: { params: Promise<{ id: string; taskId: string }> }
 ) {
   try {
-    const { id: requestId, taskId } = extractParams(params);
+    const { id: requestId, taskId } = await extractParams(params);
     
     if (!requestId || !taskId) {
       return createErrorResponse('Request ID and Task ID are required', 400);

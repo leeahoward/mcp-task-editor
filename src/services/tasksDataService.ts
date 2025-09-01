@@ -221,6 +221,12 @@ export class TasksDataService {
       
       // Verify file is not empty
       if (!fileContent.trim()) {
+        console.error('Empty file detected, attempting backup restoration');
+        const restoredData = await this.restoreFromBackup();
+        if (restoredData) {
+          this.data = restoredData;
+          return restoredData;
+        }
         throw new Error('Empty file detected');
       }
       

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { ZodError } from 'zod';
+import { ZodError, ZodIssue } from 'zod';
 import { ApiResponse, ApiError, ValidationError } from '@/types';
 
 /**
@@ -39,7 +39,7 @@ export function handleApiError(error: unknown): NextResponse<ApiResponse> {
   }
 
   if (error instanceof ZodError) {
-    const validation: ValidationError[] = error.issues.map((err: any) => ({
+    const validation: ValidationError[] = error.issues.map((err: ZodIssue) => ({
       field: err.path.join('.'),
       message: err.message
     }));
@@ -61,18 +61,20 @@ export async function extractRequestBody<T>(request: Request): Promise<T> {
   try {
     const body = await request.json();
     return body as T;
-  } catch (error) {
+  } catch {
     throw new ApiError('Invalid JSON in request body', 400);
   }
 }
 
 /**
- * Extract URL parameters
+ * Extract URL parameters (async version for Next.js 15+)
  */
-export function extractParams(params: { [key: string]: string | string[] | undefined }): { [key: string]: string } {
+export async function extractParams(params: Promise<{ [key: string]: string | string[] | undefined }> | { [key: string]: string | string[] | undefined }): Promise<{ [key: string]: string }> {
+  // Handle both sync and async params for backward compatibility
+  const resolvedParams = await Promise.resolve(params);
   const result: { [key: string]: string } = {};
   
-  for (const [key, value] of Object.entries(params)) {
+  for (const [key, value] of Object.entries(resolvedParams)) {
     if (typeof value === 'string') {
       result[key] = value;
     } else if (Array.isArray(value)) {
@@ -125,7 +127,7 @@ export function generateId(prefix: string, existingIds: string[]): string {
 /**
  * Validate required fields in an object
  */
-export function validateRequiredFields(obj: any, fields: string[]): void {
+export function validateRequiredFields(obj: Record<string, unknown>, fields: string[]): void {
   const missing = fields.filter(field => !obj[field] || obj[field] === '');
   
   if (missing.length > 0) {

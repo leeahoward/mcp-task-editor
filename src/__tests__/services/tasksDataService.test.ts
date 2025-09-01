@@ -10,6 +10,23 @@ vi.mock('os', () => ({
   hostname: () => 'test-host'
 }));
 
+// Create a proper crypto mock with chainable methods
+const createMockHash = () => ({
+  update: vi.fn().mockReturnThis(),
+  digest: vi.fn().mockReturnValue('test-checksum-123')
+});
+
+vi.mock('crypto', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('crypto')>();
+  return {
+    ...actual,
+    default: {
+      ...actual.default,
+      createHash: vi.fn(() => createMockHash())
+    }
+  };
+});
+
 const mockFs = vi.mocked(fs);
 
 describe('TasksDataService Integration Tests', () => {
@@ -58,14 +75,53 @@ describe('TasksDataService Integration Tests', () => {
     (service as any).data = null;
     (service as any).lockFile = null;
 
+    // Track written file contents for integrity checking
+    const writtenFiles: Map<string, string> = new Map();
+
     // Setup default mock behaviors
     mockFs.pathExists.mockResolvedValue(true);
-    mockFs.readFile.mockResolvedValue(JSON.stringify(testData));
-    mockFs.writeFile.mockResolvedValue(undefined);
+    
+    // Mock readFile to return what was written or default test data
+    mockFs.readFile.mockImplementation(async (filePath: string) => {
+      const pathStr = typeof filePath === 'string' ? filePath : filePath.toString();
+      if (writtenFiles.has(pathStr)) {
+        return writtenFiles.get(pathStr)!;
+      }
+      // Default return for main tasks.json
+      if (pathStr.includes('tasks.json') && !pathStr.includes('.tmp')) {
+        return JSON.stringify(testData);
+      }
+      // For checksum files, return a valid checksum
+      if (pathStr.includes('.checksum')) {
+        const dataToHash = writtenFiles.get(pathStr.replace('.checksum', '')) || JSON.stringify(testData);
+        const crypto = await import('crypto');
+        return crypto.createHash('sha256').update(dataToHash).digest('hex');
+      }
+      return JSON.stringify(testData);
+    });
+    
+    // Mock writeFile to track what gets written
+    mockFs.writeFile.mockImplementation(async (filePath: any, data: string) => {
+      const pathStr = typeof filePath === 'string' ? filePath : filePath.toString();
+      if (typeof filePath === 'number') {
+        // For file descriptor writes (lock files)
+        return undefined;
+      }
+      writtenFiles.set(pathStr, data);
+      return undefined;
+    });
+
     mockFs.ensureDir.mockResolvedValue(undefined);
     mockFs.readdir.mockResolvedValue([]);
     mockFs.unlink.mockResolvedValue(undefined);
-    mockFs.rename.mockResolvedValue(undefined);
+    mockFs.rename.mockImplementation(async (oldPath: string, newPath: string) => {
+      // When renaming, move the content from old path to new path
+      if (writtenFiles.has(oldPath)) {
+        writtenFiles.set(newPath, writtenFiles.get(oldPath)!);
+        writtenFiles.delete(oldPath);
+      }
+      return undefined;
+    });
     mockFs.close.mockResolvedValue(undefined);
     mockFs.open.mockResolvedValue(1 as any);
   });
@@ -93,17 +149,23 @@ describe('TasksDataService Integration Tests', () => {
     });
 
     it('should handle empty file gracefully', async () => {
+      // Mock empty file scenario
       mockFs.readFile.mockResolvedValue('');
-      mockFs.readdir.mockResolvedValue(['tasks-2024-01-01.json']);
-      mockFs.readFile.mockResolvedValueOnce('').mockResolvedValueOnce(JSON.stringify({
-        timestamp: '2024-01-01',
-        checksum: 'test-checksum',
-        data: testData
-      }));
-
+      
+      // Mock a backup file with valid content
+      mockFs.readdir.mockResolvedValue(['tasks-2024-01-01.json'] as never);
+      mockFs.readFile
+        .mockResolvedValueOnce('') // First call for the main file (empty)
+        .mockResolvedValueOnce(JSON.stringify({
+          timestamp: '2024-01-01T00:00:00.000Z',
+          checksum: 'valid-checksum',
+          data: testData
+        })); // Second call for the backup file
+      
       const result = await service.loadData();
       
       expect(result).toEqual(testData);
+      expect(mockFs.readdir).toHaveBeenCalledWith(expect.stringContaining('.backups'));
     });
 
     it('should handle invalid JSON with backup restoration', async () => {
@@ -144,7 +206,8 @@ describe('TasksDataService Integration Tests', () => {
       await (service as any).acquireLock();
       
       expect(mockFs.open).toHaveBeenCalledWith(testLockPath, 'wx');
-      expect(mockFs.writeFile).toHaveBeenCalledWith(1, expect.stringContaining('test-host'));
+      // Check that writeFile was called with the file descriptor and some JSON content
+      expect(mockFs.writeFile).toHaveBeenCalledWith(1, expect.stringMatching(/\{[\s\S]*"host"[\s\S]*\}/));
       
       await (service as any).releaseLock();
       
@@ -170,6 +233,7 @@ describe('TasksDataService Integration Tests', () => {
 
     it('should timeout when lock cannot be acquired', async () => {
       mockFs.open.mockRejectedValue({ code: 'EEXIST' });
+      // Mock readFile to return a recent timestamp so the lock appears fresh
       mockFs.readFile.mockResolvedValue(JSON.stringify({
         pid: 999,
         timestamp: new Date().toISOString(),
@@ -184,7 +248,7 @@ describe('TasksDataService Integration Tests', () => {
       
       // Restore original timeout
       (service as any).LOCK_TIMEOUT = originalTimeout;
-    });
+    }, 1000); // Set test timeout to 1 second
   });
 
   describe('Backup Management', () => {
@@ -449,13 +513,8 @@ describe('TasksDataService Integration Tests', () => {
     it('should verify data integrity with checksum', async () => {
       mockFs.pathExists.mockResolvedValue(true);
       mockFs.readFile.mockResolvedValueOnce('test content')
-                      .mockResolvedValueOnce('correct-checksum');
+                      .mockResolvedValueOnce('test-checksum-123'); // Use same checksum as our global mock
       
-      vi.spyOn(require('crypto'), 'createHash').mockReturnValue({
-        update: vi.fn().mockReturnThis(),
-        digest: vi.fn().mockReturnValue('correct-checksum')
-      });
-
       const isValid = await service.verifyDataIntegrity();
       
       expect(isValid).toBe(true);

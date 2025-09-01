@@ -12,10 +12,10 @@ const dataService = TasksDataService.getInstance();
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id: requestId } = extractParams(params);
+    const { id: requestId } = await extractParams(params);
     
     if (!requestId) {
       return createErrorResponse('Request ID is required', 400);
@@ -50,10 +50,10 @@ export async function GET(
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id: requestId } = extractParams(params);
+    const { id: requestId } = await extractParams(params);
     
     if (!requestId) {
       return createErrorResponse('Request ID is required', 400);
